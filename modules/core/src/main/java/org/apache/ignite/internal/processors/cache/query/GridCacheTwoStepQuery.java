@@ -60,6 +60,12 @@ public class GridCacheTwoStepQuery {
     /** */
     private boolean skipMergeTbl;
 
+    /** */
+    private List<Integer> caches;
+
+    /** */
+    private List<Integer> extraCaches;
+
     /**
      * @param schemas Schema names in query.
      * @param tbls Tables in query.
@@ -162,6 +168,34 @@ public class GridCacheTwoStepQuery {
     }
 
     /**
+     * @return Caches.
+     */
+    public List<Integer> caches() {
+        return caches;
+    }
+
+    /**
+     * @param caches Caches.
+     */
+    public void caches(List<Integer> caches) {
+        this.caches = caches;
+    }
+
+    /**
+     * @return Caches.
+     */
+    public List<Integer> extraCaches() {
+        return extraCaches;
+    }
+
+    /**
+     * @param extraCaches Caches.
+     */
+    public void extraCaches(List<Integer> extraCaches) {
+        this.extraCaches = extraCaches;
+    }
+
+    /**
      * @return Spaces.
      */
     public Collection<String> spaces() {
@@ -191,6 +225,8 @@ public class GridCacheTwoStepQuery {
 
         GridCacheTwoStepQuery cp = new GridCacheTwoStepQuery(schemas, tbls);
 
+        cp.caches = caches;
+        cp.extraCaches = extraCaches;
         cp.spaces = spaces;
         cp.rdc = rdc.copy(args);
         cp.skipMergeTbl = skipMergeTbl;

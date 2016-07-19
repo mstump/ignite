@@ -70,6 +70,7 @@ import org.apache.ignite.internal.util.typedef.CI1;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.T2;
 import org.apache.ignite.internal.util.typedef.X;
+import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.plugin.extensions.communication.Message;
@@ -265,19 +266,6 @@ public class GridMapQueryExecutor {
     }
 
     /**
-     * @param cacheName Cache name.
-     * @return Cache context or {@code null} if none.
-     */
-    @Nullable private GridCacheContext<?,?> cacheContext(String cacheName) {
-        GridCacheAdapter<?,?> cache = ctx.cache().internalCache(cacheName);
-
-        if (cache == null)
-            return null;
-
-        return cache.context();
-    }
-
-    /**
      * @param cctx Cache context.
      * @param p Partition ID.
      * @return Partition.
@@ -287,7 +275,7 @@ public class GridMapQueryExecutor {
     }
 
     /**
-     * @param cacheNames Cache names.
+     * @param cacheIds Cache IDs.
      * @param topVer Topology version.
      * @param explicitParts Explicit partitions list.
      * @param reserved Reserved list.
@@ -295,7 +283,7 @@ public class GridMapQueryExecutor {
      * @throws IgniteCheckedException If failed.
      */
     private boolean reservePartitions(
-        Collection<String> cacheNames,
+        List<Integer> cacheIds,
         AffinityTopologyVersion topVer,
         final int[] explicitParts,
         List<GridReservable> reserved
@@ -304,8 +292,8 @@ public class GridMapQueryExecutor {
 
         Collection<Integer> partIds = wrap(explicitParts);
 
-        for (String cacheName : cacheNames) {
-            GridCacheContext<?, ?> cctx = cacheContext(cacheName);
+        for (int i = 0; i < cacheIds.size(); i++) {
+            GridCacheContext<?, ?> cctx = ctx.cache().context().cacheContext(cacheIds.get(i));
 
             if (cctx == null) // Cache was not found, probably was not deployed yet.
                 return false;
@@ -427,12 +415,23 @@ public class GridMapQueryExecutor {
      * @param req Query request.
      */
     private void onQueryRequest(ClusterNode node, GridQueryRequest req) {
-        List<String> caches = (List<String>)F.concat(true, req.space(), req.extraSpaces());
+        List<Integer> cacheIds;
+
+        if (req.extraSpaces() != null) {
+            cacheIds = new ArrayList<>(req.extraSpaces().size() + 1);
+
+            cacheIds.add(CU.cacheId(req.space()));
+
+            for (String extraSpace : req.extraSpaces())
+                cacheIds.add(CU.cacheId(extraSpace));
+        }
+        else
+            cacheIds = Collections.singletonList(CU.cacheId(req.space()));
 
         onQueryRequest0(node,
             req.requestId(),
             req.queries(),
-            caches,
+            cacheIds,
             req.topologyVersion(),
             null,
             req.partitions(),
@@ -465,7 +464,7 @@ public class GridMapQueryExecutor {
      * @param node Node authored request.
      * @param reqId Request ID.
      * @param qrys Queries to execute.
-     * @param caches Caches which will be affected by these queries.
+     * @param cacheIds Caches which will be affected by these queries.
      * @param topVer Topology version.
      * @param partsMap Partitions map for unstable topology.
      * @param parts Explicit partitions for current node.
@@ -477,7 +476,7 @@ public class GridMapQueryExecutor {
         ClusterNode node,
         long reqId,
         Collection<GridCacheSqlQuery> qrys,
-        List<String> caches,
+        List<Integer> cacheIds,
         AffinityTopologyVersion topVer,
         Map<UUID, int[]> partsMap,
         int[] parts,
@@ -494,20 +493,18 @@ public class GridMapQueryExecutor {
         try {
             if (topVer != null) {
                 // Reserve primary for topology version or explicit partitions.
-                if (!reservePartitions(caches, topVer, parts, reserved)) {
+                if (!reservePartitions(cacheIds, topVer, parts, reserved)) {
                     sendRetry(node, reqId);
 
                     return;
                 }
             }
 
-            String mainCache = caches.get(0);
-
             // Prepare to run queries.
-            GridCacheContext<?,?> mainCctx = cacheContext(mainCache);
+            GridCacheContext<?, ?> mainCctx = ctx.cache().context().cacheContext(cacheIds.get(0));
 
             if (mainCctx == null)
-                throw new CacheException("Failed to find cache: " + mainCache);
+                throw new CacheException("Failed to find cache.");
 
             qr = new QueryResults(reqId, qrys.size(), mainCctx);
 
@@ -542,7 +539,7 @@ public class GridMapQueryExecutor {
                 }
             }
 
-            Connection conn = h2.connectionForSpace(mainCache);
+            Connection conn = h2.connectionForSpace(mainCctx.name());
 
             // Here we enforce join order to have the same behavior on all the nodes.
             h2.setupConnection(conn, distributedJoins, true);
@@ -569,7 +566,7 @@ public class GridMapQueryExecutor {
                 int i = 0;
 
                 for (GridCacheSqlQuery qry : qrys) {
-                    ResultSet rs = h2.executeSqlQueryWithTimer(mainCache, conn, qry.query(),
+                    ResultSet rs = h2.executeSqlQueryWithTimer(mainCctx.name(), conn, qry.query(),
                         F.asList(qry.parameters()), true);
 
                     if (ctx.event().isRecordable(EVT_CACHE_QUERY_EXECUTED)) {

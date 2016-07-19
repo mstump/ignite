@@ -55,8 +55,8 @@ public class GridH2QueryRequest implements Message, GridCacheQueryMarshallable {
 
     /** */
     @GridToStringInclude
-    @GridDirectCollection(String.class)
-    private List<String> caches;
+    @GridDirectCollection(Integer.class)
+    private List<Integer> caches;
 
     /** Topology version. */
     private AffinityTopologyVersion topVer;
@@ -120,7 +120,7 @@ public class GridH2QueryRequest implements Message, GridCacheQueryMarshallable {
      * @param caches Caches.
      * @return {@code this}.
      */
-    public GridH2QueryRequest caches(List<String> caches) {
+    public GridH2QueryRequest caches(List<Integer> caches) {
         this.caches = caches;
 
         return this;
@@ -129,7 +129,7 @@ public class GridH2QueryRequest implements Message, GridCacheQueryMarshallable {
     /**
      * @return Caches.
      */
-    public List<String> caches() {
+    public List<Integer> caches() {
         return caches;
     }
 
@@ -250,7 +250,7 @@ public class GridH2QueryRequest implements Message, GridCacheQueryMarshallable {
 
         switch (writer.state()) {
             case 0:
-                if (!writer.writeCollection("caches", caches, MessageCollectionItemType.STRING))
+                if (!writer.writeCollection("caches", caches, MessageCollectionItemType.INT))
                     return false;
 
                 writer.incrementState();
@@ -311,7 +311,7 @@ public class GridH2QueryRequest implements Message, GridCacheQueryMarshallable {
 
         switch (reader.state()) {
             case 0:
-                caches = reader.readCollection("caches", MessageCollectionItemType.STRING);
+                caches = reader.readCollection("caches", MessageCollectionItemType.INT);
 
                 if (!reader.isLastRead())
                     return false;

@@ -107,6 +107,7 @@ import org.apache.ignite.internal.util.lang.IgniteInClosure2X;
 import org.apache.ignite.internal.util.offheap.unsafe.GridUnsafeGuard;
 import org.apache.ignite.internal.util.offheap.unsafe.GridUnsafeMemory;
 import org.apache.ignite.internal.util.typedef.F;
+import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.LT;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.SB;
@@ -1147,15 +1148,41 @@ public class IgniteH2Indexing implements GridQueryIndexing {
                 twoStepQry = GridSqlQuerySplitter.split((JdbcPreparedStatement)stmt, qry.getArgs(), grpByCollocated,
                     distributedJoins);
 
+                List<Integer> caches;
+                List<Integer> extraCaches = null;
+
                 // Setup spaces from schemas.
                 if (!twoStepQry.schemas().isEmpty()) {
                     Collection<String> spaces = new ArrayList<>(twoStepQry.schemas().size());
+                    caches = new ArrayList<>(twoStepQry.schemas().size() + 1);
+                    caches.add(cctx.cacheId());
 
-                    for (String schema : twoStepQry.schemas())
-                        spaces.add(space(schema));
+                    for (String schema : twoStepQry.schemas()) {
+                        String space0 = space(schema);
+
+                        spaces.add(space0);
+
+                        if (!F.eq(space0, space)) {
+                            int cacheId = CU.cacheId(space0);
+
+                            caches.add(cacheId);
+
+                            if (extraCaches == null)
+                                extraCaches = new ArrayList<>();
+
+                            extraCaches.add(cacheId);
+                        }
+                    }
 
                     twoStepQry.spaces(spaces);
                 }
+                else {
+                    caches = Collections.singletonList(cctx.cacheId());
+                    extraCaches = null;
+                }
+
+                twoStepQry.caches(caches);
+                twoStepQry.extraCaches(extraCaches);
 
                 meta = meta(stmt.getMetaData());
             }

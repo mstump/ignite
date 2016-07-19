@@ -362,13 +362,13 @@ public class GridReduceQueryExecutor {
      * @param extraSpaces Extra spaces.
      * @return {@code true} If preloading is active.
      */
-    private boolean isPreloadingActive(final GridCacheContext<?,?> cctx, List<String> extraSpaces) {
+    private boolean isPreloadingActive(final GridCacheContext<?,?> cctx, List<Integer> extraSpaces) {
         if (hasMovingPartitions(cctx))
             return true;
 
         if (extraSpaces != null) {
-            for (String extraSpace : extraSpaces) {
-                if (hasMovingPartitions(cacheContext(extraSpace)))
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                if (hasMovingPartitions(cacheContext(extraSpaces.get(i))))
                     return true;
             }
         }
@@ -392,11 +392,11 @@ public class GridReduceQueryExecutor {
     }
 
     /**
-     * @param name Cache name.
+     * @param cacheId Cache ID.
      * @return Cache context.
      */
-    private GridCacheContext<?,?> cacheContext(String name) {
-        return ctx.cache().internalCache(name).context();
+    private GridCacheContext<?,?> cacheContext(Integer cacheId) {
+        return ctx.cache().context().cacheContext(cacheId);
     }
 
     /**
@@ -407,19 +407,19 @@ public class GridReduceQueryExecutor {
      */
     private Collection<ClusterNode> stableDataNodes(
         AffinityTopologyVersion topVer,
-        final GridCacheContext<?,?> cctx,
-        List<String> extraSpaces
+        final GridCacheContext<?, ?> cctx,
+        List<Integer> extraSpaces
     ) {
-        String space = cctx.name();
-
         Set<ClusterNode> nodes = new HashSet<>(cctx.affinity().assignment(topVer).primaryPartitionNodes());
 
         if (F.isEmpty(nodes))
-            throw new CacheException("Failed to find data nodes for cache: " + space);
+            throw new CacheException("Failed to find data nodes for cache: " + cctx.name());
 
         if (!F.isEmpty(extraSpaces)) {
-            for (String extraSpace : extraSpaces) {
-                GridCacheContext<?,?> extraCctx = cacheContext(extraSpace);
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                GridCacheContext<?,?> extraCctx = cacheContext(extraSpaces.get(i));
+
+                String extraSpace = extraCctx.name();
 
                 if (extraCctx.isLocal())
                     continue; // No consistency guaranties for local caches.
@@ -503,7 +503,7 @@ public class GridReduceQueryExecutor {
      * @return Cursor.
      */
     public Iterator<List<?>> query(
-        GridCacheContext<?,?> cctx,
+        GridCacheContext<?, ?> cctx,
         GridCacheTwoStepQuery qry,
         boolean keepPortable,
         boolean enforceJoinOrder
@@ -528,7 +528,7 @@ public class GridReduceQueryExecutor {
 
             AffinityTopologyVersion topVer = h2.readyTopologyVersion();
 
-            List<String> extraSpaces = extraSpaces(space, qry.spaces());
+            List<Integer> extraSpaces = qry.extraCaches();
 
             Collection<ClusterNode> nodes;
 
@@ -619,12 +619,18 @@ public class GridReduceQueryExecutor {
 
                 if (send(nodes,
                     oldStyle ?
-                        new GridQueryRequest(qryReqId, r.pageSize, space, mapQrys, topVer, extraSpaces, null) :
+                        new GridQueryRequest(qryReqId,
+                            r.pageSize,
+                            space,
+                            mapQrys,
+                            topVer,
+                            extraSpaces(space, qry.spaces()),
+                            null) :
                         new GridH2QueryRequest()
                             .requestId(qryReqId)
                             .topologyVersion(topVer)
                             .pageSize(r.pageSize)
-                            .caches(join(space, extraSpaces))
+                            .caches(qry.caches())
                             .tables(distributedJoins ? qry.tables() : null)
                             .partitions(convert(partsMap))
                             .queries(mapQrys)
@@ -851,8 +857,8 @@ public class GridReduceQueryExecutor {
      * @param extraSpaces Extra spaces.
      * @return Collection of all data nodes owning all the caches or {@code null} for retry.
      */
-    private Collection<ClusterNode> replicatedUnstableDataNodes(final GridCacheContext<?,?> cctx,
-        List<String> extraSpaces) {
+    private Collection<ClusterNode> replicatedUnstableDataNodes(final GridCacheContext<?, ?> cctx,
+        List<Integer> extraSpaces) {
         assert cctx.isReplicated() : cctx.name() + " must be replicated";
 
         Set<ClusterNode> nodes = replicatedUnstableDataNodes(cctx);
@@ -861,15 +867,15 @@ public class GridReduceQueryExecutor {
             return null; // Retry.
 
         if (!F.isEmpty(extraSpaces)) {
-            for (String extraSpace : extraSpaces) {
-                GridCacheContext<?,?> extraCctx = cacheContext(extraSpace);
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                GridCacheContext<?, ?> extraCctx = cacheContext(extraSpaces.get(i));
 
                 if (extraCctx.isLocal())
                     continue;
 
                 if (!extraCctx.isReplicated())
                     throw new CacheException("Queries running on replicated cache should not contain JOINs " +
-                        "with tables in partitioned caches [rCache=" + cctx.name() + ", pCache=" + extraSpace + "]");
+                        "with tables in partitioned caches [rCache=" + cctx.name() + ", pCache=" + extraCctx.name() + "]");
 
                 Set<ClusterNode> extraOwners = replicatedUnstableDataNodes(extraCctx);
 
@@ -938,14 +944,14 @@ public class GridReduceQueryExecutor {
      */
     @SuppressWarnings("unchecked")
     private Map<ClusterNode, IntArray> partitionedUnstableDataNodes(final GridCacheContext<?,?> cctx,
-        List<String> extraSpaces) {
+        List<Integer> extraSpaces) {
         assert !cctx.isReplicated() && !cctx.isLocal() : cctx.name() + " must be partitioned";
 
         final int partsCnt = cctx.affinity().partitions();
 
         if (extraSpaces != null) { // Check correct number of partitions for partitioned caches.
-            for (String extraSpace : extraSpaces) {
-                GridCacheContext<?,?> extraCctx = cacheContext(extraSpace);
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                GridCacheContext<?, ?> extraCctx = cacheContext(extraSpaces.get(i));
 
                 if (extraCctx.isReplicated() || extraCctx.isLocal())
                     continue;
@@ -954,7 +960,7 @@ public class GridReduceQueryExecutor {
 
                 if (parts != partsCnt)
                     throw new CacheException("Number of partitions must be the same for correct collocation [cache1=" +
-                        cctx.name() + ", parts1=" + partsCnt + ", cache2=" + extraSpace + ", parts2=" + parts + "]");
+                        cctx.name() + ", parts1=" + partsCnt + ", cache2=" + extraCctx.name() + ", parts2=" + parts + "]");
             }
         }
 
@@ -977,8 +983,8 @@ public class GridReduceQueryExecutor {
         if (extraSpaces != null) {
             // Find owner intersections for each participating partitioned cache partition.
             // We need this for logical collocation between different partitioned caches with the same affinity.
-            for (String extraSpace : extraSpaces) {
-                GridCacheContext<?,?> extraCctx = cacheContext(extraSpace);
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                GridCacheContext<?, ?> extraCctx = cacheContext(extraSpaces.get(i));
 
                 if (extraCctx.isReplicated() || extraCctx.isLocal())
                     continue;
@@ -987,10 +993,10 @@ public class GridReduceQueryExecutor {
                     List<ClusterNode> owners = extraCctx.topology().owners(p);
 
                     if (F.isEmpty(owners)) {
-                        if (!F.isEmpty(dataNodes(extraSpace, NONE)))
+                        if (!F.isEmpty(dataNodes(extraCctx.name(), NONE)))
                             return null; // Retry.
 
-                        throw new CacheException("Failed to find data nodes [cache=" + extraSpace + ", part=" + p + "]");
+                        throw new CacheException("Failed to find data nodes [cache=" + extraCctx.name() + ", part=" + p + "]");
                     }
 
                     if (partLocs[p] == null)
@@ -1005,8 +1011,8 @@ public class GridReduceQueryExecutor {
             }
 
             // Filter nodes where not all the replicated caches loaded.
-            for (String extraSpace : extraSpaces) {
-                GridCacheContext<?,?> extraCctx = cacheContext(extraSpace);
+            for (int i = 0; i < extraSpaces.size(); i++) {
+                GridCacheContext<?,?> extraCctx = cacheContext(extraSpaces.get(i));
 
                 if (!extraCctx.isReplicated())
                     continue;
@@ -1156,23 +1162,6 @@ public class GridReduceQueryExecutor {
         assert parts != null : node;
 
         res.partitions(toArray(parts));
-
-        return res;
-    }
-
-    /**
-     * @param first First element.
-     * @param rest Other elements.
-     * @return New joined list.
-     */
-    private static <Z> List<Z> join(Z first, List<Z> rest) {
-        if (F.isEmpty(rest))
-            return Collections.singletonList(first);
-
-        List<Z> res = new ArrayList<>(rest.size() + 1);
-
-        res.add(first);
-        res.addAll(rest);
 
         return res;
     }
